@@ -1,26 +1,28 @@
-import {VoiceChannel, Snowflake} from 'discord.js';
-import {Readable} from 'stream';
-import hasha from 'hasha';
-import {WriteStream} from 'fs-capacitor';
-import ffmpeg from 'fluent-ffmpeg';
-import shuffle from 'array-shuffle';
-import {spawn} from 'child_process';
+import { VoiceChannel, Snowflake } from "discord.js";
+import { Readable } from "stream";
+import hasha from "hasha";
+import { WriteStream } from "fs-capacitor";
+import ffmpeg from "fluent-ffmpeg";
+import shuffle from "array-shuffle";
+import { spawn } from "child_process";
 import {
   AudioPlayer,
   AudioPlayerState,
-  AudioPlayerStatus, AudioResource,
+  AudioPlayerStatus,
+  AudioResource,
   createAudioPlayer,
-  createAudioResource, DiscordGatewayAdapterCreator,
+  createAudioResource,
+  DiscordGatewayAdapterCreator,
   joinVoiceChannel,
   StreamType,
   VoiceConnection,
   VoiceConnectionStatus,
-} from '@discordjs/voice';
-import FileCacheProvider from './file-cache.js';
-import debug from '../utils/debug.js';
-import {getGuildSettings} from '../utils/get-guild-settings.js';
-import {buildPlayingMessageEmbed} from '../utils/build-embed.js';
-import {Setting} from '@prisma/client';
+} from "@discordjs/voice";
+import FileCacheProvider from "./file-cache.js";
+import debug from "../utils/debug.js";
+import { getGuildSettings } from "../utils/get-guild-settings.js";
+import { buildPlayingMessageEmbed } from "../utils/build-embed.js";
+import { Setting } from "@prisma/client";
 
 export enum MediaSource {
   Youtube,
@@ -106,7 +108,7 @@ export default class {
   private defaultVolume: number = DEFAULT_VOLUME;
   private nowPlaying: QueuedSong | null = null;
   private playPositionInterval: NodeJS.Timeout | undefined;
-  private lastSongURL = '';
+  private lastSongURL = "";
 
   private positionInSeconds = 0;
   private readonly fileCache: FileCacheProvider;
@@ -122,31 +124,32 @@ export default class {
   async connect(channel: VoiceChannel): Promise<void> {
     // Always get freshest default volume setting value
     const settings = await getGuildSettings(this.guildId);
-    const {defaultVolume = DEFAULT_VOLUME} = settings;
+    const { defaultVolume = DEFAULT_VOLUME } = settings;
     this.defaultVolume = defaultVolume;
 
     this.voiceConnection = joinVoiceChannel({
       channelId: channel.id,
       guildId: channel.guild.id,
       selfDeaf: true,
-      adapterCreator: channel.guild.voiceAdapterCreator as DiscordGatewayAdapterCreator,
+      adapterCreator: channel.guild
+        .voiceAdapterCreator as DiscordGatewayAdapterCreator,
     });
 
     const guildSettings = await getGuildSettings(this.guildId);
 
     // Workaround to disable keepAlive
-    this.voiceConnection.on('stateChange', (oldState, newState) => {
+    this.voiceConnection.on("stateChange", (oldState, newState) => {
       /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
-      const oldNetworking = Reflect.get(oldState, 'networking');
-      const newNetworking = Reflect.get(newState, 'networking');
+      const oldNetworking = Reflect.get(oldState, "networking");
+      const newNetworking = Reflect.get(newState, "networking");
 
       const networkStateChangeHandler = (_: any, newNetworkState: any) => {
-        const newUdp = Reflect.get(newNetworkState, 'udp');
+        const newUdp = Reflect.get(newNetworkState, "udp");
         clearInterval(newUdp?.keepAliveInterval);
       };
 
-      oldNetworking?.off('stateChange', networkStateChangeHandler);
-      newNetworking?.on('stateChange', networkStateChangeHandler);
+      oldNetworking?.off("stateChange", networkStateChangeHandler);
+      newNetworking?.on("stateChange", networkStateChangeHandler);
       /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 
       this.currentChannel = channel;
@@ -176,17 +179,17 @@ export default class {
     this.status = STATUS.PAUSED;
 
     if (this.voiceConnection === null) {
-      throw new Error('Not connected to a voice channel.');
+      throw new Error("Not connected to a voice channel.");
     }
 
     const currentSong = this.getCurrent();
 
     if (!currentSong) {
-      throw new Error('No song currently playing');
+      throw new Error("No song currently playing");
     }
 
     if (positionSeconds > currentSong.length) {
-      throw new Error('Seek position is outside the range of the song.');
+      throw new Error("Seek position is outside the range of the song.");
     }
 
     let realPositionSeconds = positionSeconds;
@@ -196,7 +199,10 @@ export default class {
       to = currentSong.length + currentSong.offset;
     }
 
-    const stream = await this.getStream(currentSong, {seek: realPositionSeconds, to});
+    const stream = await this.getStream(currentSong, {
+      seek: realPositionSeconds,
+      to,
+    });
     this.audioPlayer = createAudioPlayer({
       behaviors: {
         // Needs to be somewhat high for livestreams
@@ -221,13 +227,13 @@ export default class {
 
   async play(): Promise<void> {
     if (this.voiceConnection === null) {
-      throw new Error('Not connected to a voice channel.');
+      throw new Error("Not connected to a voice channel.");
     }
 
     const currentSong = this.getCurrent();
 
     if (!currentSong) {
-      throw new Error('Queue empty.');
+      throw new Error("Queue empty.");
     }
 
     // Cancel any pending idle disconnection
@@ -237,7 +243,10 @@ export default class {
     }
 
     // Resume from paused state
-    if (this.status === STATUS.PAUSED && currentSong.url === this.nowPlaying?.url) {
+    if (
+      this.status === STATUS.PAUSED &&
+      currentSong.url === this.nowPlaying?.url
+    ) {
       if (this.audioPlayer) {
         this.audioPlayer.unpause();
         this.status = STATUS.PLAYING;
@@ -259,7 +268,10 @@ export default class {
         to = currentSong.length + currentSong.offset;
       }
 
-      const stream = await this.getStream(currentSong, {seek: positionSeconds, to});
+      const stream = await this.getStream(currentSong, {
+        seek: positionSeconds,
+        to,
+      });
       this.audioPlayer = createAudioPlayer({
         behaviors: {
           // Needs to be somewhat high for livestreams
@@ -284,7 +296,7 @@ export default class {
     } catch (error: unknown) {
       await this.forward(1);
 
-      if ((error as {statusCode: number}).statusCode === 410 && currentSong) {
+      if ((error as { statusCode: number }).statusCode === 410 && currentSong) {
         const channelId = currentSong.addedInChannelId;
 
         if (channelId) {
@@ -299,7 +311,7 @@ export default class {
 
   pause(): void {
     if (this.status !== STATUS.PLAYING) {
-      throw new Error('Not currently playing.');
+      throw new Error("Not currently playing.");
     }
 
     this.status = STATUS.PAUSED;
@@ -323,7 +335,7 @@ export default class {
 
         const settings = await getGuildSettings(this.guildId);
 
-        const {secondsToWaitAfterQueueEmpties} = settings;
+        const { secondsToWaitAfterQueueEmpties } = settings;
         if (secondsToWaitAfterQueueEmpties !== 0) {
           this.disconnectTimer = setTimeout(() => {
             // Make sure we are not accidentally playing
@@ -341,12 +353,15 @@ export default class {
   }
 
   registerVoiceActivityListener(guildSettings: Setting) {
-    const {turnDownVolumeWhenPeopleSpeak, turnDownVolumeWhenPeopleSpeakTarget} = guildSettings;
+    const {
+      turnDownVolumeWhenPeopleSpeak,
+      turnDownVolumeWhenPeopleSpeakTarget,
+    } = guildSettings;
     if (!turnDownVolumeWhenPeopleSpeak || !this.voiceConnection) {
       return;
     }
 
-    this.voiceConnection.receiver.speaking.on('start', (userId: string) => {
+    this.voiceConnection.receiver.speaking.on("start", (userId: string) => {
       if (!this.currentChannel) {
         return;
       }
@@ -362,10 +377,12 @@ export default class {
         this.channelToSpeakingUsers.get(channelId)?.add(member.id);
       }
 
-      this.suppressVoiceWhenPeopleAreSpeaking(turnDownVolumeWhenPeopleSpeakTarget);
+      this.suppressVoiceWhenPeopleAreSpeaking(
+        turnDownVolumeWhenPeopleSpeakTarget,
+      );
     });
 
-    this.voiceConnection.receiver.speaking.on('end', (userId: string) => {
+    this.voiceConnection.receiver.speaking.on("end", (userId: string) => {
       if (!this.currentChannel) {
         return;
       }
@@ -380,16 +397,22 @@ export default class {
         this.channelToSpeakingUsers.get(channelId)?.delete(member.id);
       }
 
-      this.suppressVoiceWhenPeopleAreSpeaking(turnDownVolumeWhenPeopleSpeakTarget);
+      this.suppressVoiceWhenPeopleAreSpeaking(
+        turnDownVolumeWhenPeopleSpeakTarget,
+      );
     });
   }
 
-  suppressVoiceWhenPeopleAreSpeaking(turnDownVolumeWhenPeopleSpeakTarget: number): void {
+  suppressVoiceWhenPeopleAreSpeaking(
+    turnDownVolumeWhenPeopleSpeakTarget: number,
+  ): void {
     if (!this.currentChannel) {
       return;
     }
 
-    const speakingUsers = this.channelToSpeakingUsers.get(this.currentChannel.id);
+    const speakingUsers = this.channelToSpeakingUsers.get(
+      this.currentChannel.id,
+    );
     if (speakingUsers && speakingUsers.size > 0) {
       this.setVolume(turnDownVolumeWhenPeopleSpeakTarget);
     } else {
@@ -398,7 +421,7 @@ export default class {
   }
 
   canGoForward(skip: number) {
-    return (this.queuePosition + skip - 1) < this.queue.length;
+    return this.queuePosition + skip - 1 < this.queue.length;
   }
 
   manualForward(skip: number): void {
@@ -407,7 +430,7 @@ export default class {
       this.positionInSeconds = 0;
       this.stopTrackingPosition();
     } else {
-      throw new Error('No songs in queue to forward to.');
+      throw new Error("No songs in queue to forward to.");
     }
   }
 
@@ -425,7 +448,7 @@ export default class {
         await this.play();
       }
     } else {
-      throw new Error('No songs in queue to go back to.');
+      throw new Error("No songs in queue to go back to.");
     }
   }
 
@@ -445,21 +468,28 @@ export default class {
     return this.queue.slice(this.queuePosition + 1);
   }
 
-  add(song: QueuedSong, {immediate = false} = {}): void {
+  add(song: QueuedSong, { immediate = false } = {}): void {
     if (song.playlist || !immediate) {
       // Add to end of queue
       this.queue.push(song);
     } else {
       // Add as the next song to be played
       const insertAt = this.queuePosition + 1;
-      this.queue = [...this.queue.slice(0, insertAt), song, ...this.queue.slice(insertAt)];
+      this.queue = [
+        ...this.queue.slice(0, insertAt),
+        song,
+        ...this.queue.slice(insertAt),
+      ];
     }
   }
 
   shuffle(): void {
     const shuffledSongs = shuffle(this.queue.slice(this.queuePosition + 1));
 
-    this.queue = [...this.queue.slice(0, this.queuePosition + 1), ...shuffledSongs];
+    this.queue = [
+      ...this.queue.slice(0, this.queuePosition + 1),
+      ...shuffledSongs,
+    ];
   }
 
   clear(): void {
@@ -481,7 +511,10 @@ export default class {
   }
 
   removeCurrent(): void {
-    this.queue = [...this.queue.slice(0, this.queuePosition), ...this.queue.slice(this.queuePosition + 1)];
+    this.queue = [
+      ...this.queue.slice(0, this.queuePosition),
+      ...this.queue.slice(this.queuePosition + 1),
+    ];
   }
 
   queueSize(): number {
@@ -500,10 +533,14 @@ export default class {
 
   move(from: number, to: number): QueuedSong {
     if (from > this.queueSize() || to > this.queueSize()) {
-      throw new Error('Move index is outside the range of the queue.');
+      throw new Error("Move index is outside the range of the queue.");
     }
 
-    this.queue.splice(this.queuePosition + to, 0, this.queue.splice(this.queuePosition + from, 1)[0]);
+    this.queue.splice(
+      this.queuePosition + to,
+      0,
+      this.queue.splice(this.queuePosition + from, 1)[0],
+    );
 
     return this.queue[this.queuePosition + to];
   }
@@ -521,40 +558,45 @@ export default class {
 
   private async getVideoInfoWithYtDlp(url: string): Promise<YtDlpResponse> {
     return new Promise((resolve, reject) => {
-      const ytDlp = spawn('yt-dlp', ['--dump-json', '--no-warnings', url]);
+      const ytDlp = spawn("yt-dlp", ["--dump-json", "--no-warnings", url]);
 
-      let stdout = '';
-      let stderr = '';
+      let stdout = "";
+      let stderr = "";
 
-      ytDlp.stdout.on('data', (data: Buffer) => {
+      ytDlp.stdout.on("data", (data: Buffer) => {
         stdout += data.toString();
       });
 
-      ytDlp.stderr.on('data', (data: Buffer) => {
+      ytDlp.stderr.on("data", (data: Buffer) => {
         stderr += data.toString();
       });
 
-      ytDlp.on('close', (code: number) => {
+      ytDlp.on("close", (code: number) => {
         if (code === 0) {
           try {
             const info = JSON.parse(stdout) as YtDlpResponse;
             resolve(info);
           } catch (parseError: unknown) {
-            reject(new Error(`Failed to parse yt-dlp JSON output: ${String(parseError)}`));
+            reject(
+              new Error(
+                `Failed to parse yt-dlp JSON output: ${String(parseError)}`,
+              ),
+            );
           }
         } else {
           reject(new Error(`yt-dlp failed with code ${code}: ${stderr}`));
         }
       });
 
-      ytDlp.on('error', (error: Error) => {
+      ytDlp.on("error", (error: Error) => {
         reject(new Error(`Failed to spawn yt-dlp: ${error.message}`));
       });
     });
   }
 
   private extractVideoId(url: string): string {
-    const regex = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/;
+    const regex =
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/;
     const match = regex.exec(url);
     return match?.[1] ?? url;
   }
@@ -567,28 +609,33 @@ export default class {
     const videoId = this.extractVideoId(url);
 
     // Construct full YouTube URL if we only have a video ID
-    const fullUrl = url.includes('youtube.com') || url.includes('youtu.be') ? url : `https://www.youtube.com/watch?v=${videoId}`;
+    const fullUrl =
+      url.includes("youtube.com") || url.includes("youtu.be")
+        ? url
+        : `https://www.youtube.com/watch?v=${videoId}`;
 
     const info = await this.getVideoInfoWithYtDlp(fullUrl);
 
-    const formats: VideoFormat[] = (info.formats ?? []).map((format: YtDlpFormat) => ({
-      url: format.url ?? '',
-      itag: format.format_id ?? '',
-      codecs:
-                    format.acodec && format.acodec !== 'none'
-                      ? format.acodec
-                      : format.vcodec ?? '',
-      container: format.ext ?? '',
-      audioSampleRate: format.asr?.toString(),
-      averageBitrate: format.abr,
-      bitrate: format.tbr,
-      isLive: info.is_live ?? false,
-    }));
+    const formats: VideoFormat[] = (info.formats ?? []).map(
+      (format: YtDlpFormat) => ({
+        url: format.url ?? "",
+        itag: format.format_id ?? "",
+        codecs:
+          format.acodec && format.acodec !== "none"
+            ? format.acodec
+            : (format.vcodec ?? ""),
+        container: format.ext ?? "",
+        audioSampleRate: format.asr?.toString(),
+        averageBitrate: format.abr,
+        bitrate: format.tbr,
+        isLive: info.is_live ?? false,
+      }),
+    );
 
     return {
       formats,
       isLive: info.is_live ?? false,
-      lengthSeconds: info.duration?.toString() ?? '0',
+      lengthSeconds: info.duration?.toString() ?? "0",
     };
   }
 
@@ -596,7 +643,10 @@ export default class {
     return hasha(url);
   }
 
-  private async getStream(song: QueuedSong, options: {seek?: number; to?: number} = {}): Promise<Readable> {
+  private async getStream(
+    song: QueuedSong,
+    options: { seek?: number; to?: number } = {},
+  ): Promise<Readable> {
     if (this.status === STATUS.PLAYING) {
       this.audioPlayer?.stop();
     } else if (this.status === STATUS.PAUSED) {
@@ -604,7 +654,7 @@ export default class {
     }
 
     if (song.source === MediaSource.HLS) {
-      return this.createReadStream({url: song.url, cacheKey: song.url});
+      return this.createReadStream({ url: song.url, cacheKey: song.url });
     }
 
     let ffmpegInput: string | null;
@@ -613,32 +663,49 @@ export default class {
 
     let format: YTDLVideoFormat | undefined;
 
-    ffmpegInput = await this.fileCache.getPathFor(this.getHashForCache(song.url));
+    ffmpegInput = await this.fileCache.getPathFor(
+      this.getHashForCache(song.url),
+    );
 
     if (!ffmpegInput) {
       // Not yet cached, must download
       const info = await this.getYouTubeInfo(song.url);
 
-      const {formats} = info;
+      const { formats } = info;
 
-      // Look for the ideal format (opus codec, webm container, 48kHz)
-      const filter = (format: VideoFormat): boolean => format.codecs === 'opus' && format.container === 'webm' && format.audioSampleRate !== undefined && parseInt(format.audioSampleRate, 10) === 48000 && Boolean(format.url);
+      // Look for the ideal format (opus codec, webm container, 64kHz)
+      const filter = (format: VideoFormat): boolean =>
+        format.codecs === "opus" &&
+        format.container === "webm" &&
+        format.audioSampleRate !== undefined &&
+        parseInt(format.audioSampleRate, 10) === 64000 &&
+        Boolean(format.url);
 
       format = formats.find(filter);
 
-      const nextBestFormat = (formats: VideoFormat[]): VideoFormat | undefined => {
+      const nextBestFormat = (
+        formats: VideoFormat[],
+      ): VideoFormat | undefined => {
         if (formats.length < 1) {
           return undefined;
         }
 
         if (formats[0].isLive) {
-          formats = formats.sort((a, b) => (b as unknown as {audioBitrate: number}).audioBitrate - (a as unknown as {audioBitrate: number}).audioBitrate);
+          formats = formats.sort(
+            (a, b) =>
+              (b as unknown as { audioBitrate: number }).audioBitrate -
+              (a as unknown as { audioBitrate: number }).audioBitrate,
+          );
 
-          return formats.find(format => [128, 127, 120, 96, 95, 94, 93].includes(parseInt(format.itag as unknown as string, 10)));
+          return formats.find((format) =>
+            [128, 127, 120, 96, 95, 94, 93].includes(
+              parseInt(format.itag as unknown as string, 10),
+            ),
+          );
         }
 
         formats = formats
-          .filter(format => format.averageBitrate)
+          .filter((format) => format.averageBitrate)
           .sort((a, b) => {
             if (a && b) {
               return b.averageBitrate! - a.averageBitrate!;
@@ -646,7 +713,7 @@ export default class {
 
             return 0;
           });
-        return formats.find(format => !format.bitrate) ?? formats[0];
+        return formats.find((format) => !format.bitrate) ?? formats[0];
       };
 
       if (!format) {
@@ -654,36 +721,41 @@ export default class {
 
         if (!format) {
           // If still no format is found, throw
-          throw new Error('Can\'t find suitable format.');
+          throw new Error("Can't find suitable format.");
         }
       }
 
-      debug('Using format', format);
+      debug("Using format", format);
 
       ffmpegInput = format.url;
 
       // Don't cache livestreams or long videos
       const MAX_CACHE_LENGTH_SECONDS = 30 * 60; // 30 minutes
-      shouldCacheVideo = !info.isLive && parseInt(info.lengthSeconds, 10) < MAX_CACHE_LENGTH_SECONDS && !options.seek;
+      shouldCacheVideo =
+        !info.isLive &&
+        parseInt(info.lengthSeconds, 10) < MAX_CACHE_LENGTH_SECONDS &&
+        !options.seek;
 
-      debug(shouldCacheVideo ? 'Caching video' : 'Not caching video');
+      debug(shouldCacheVideo ? "Caching video" : "Not caching video");
 
-      ffmpegInputOptions.push(...[
-        '-reconnect',
-        '1',
-        '-reconnect_streamed',
-        '1',
-        '-reconnect_delay_max',
-        '5',
-      ]);
+      ffmpegInputOptions.push(
+        ...[
+          "-reconnect",
+          "1",
+          "-reconnect_streamed",
+          "1",
+          "-reconnect_delay_max",
+          "5",
+        ],
+      );
     }
 
     if (options.seek) {
-      ffmpegInputOptions.push('-ss', options.seek.toString());
+      ffmpegInputOptions.push("-ss", options.seek.toString());
     }
 
     if (options.to) {
-      ffmpegInputOptions.push('-to', options.to.toString());
+      ffmpegInputOptions.push("-to", options.to.toString());
     }
 
     return this.createReadStream({
@@ -691,7 +763,9 @@ export default class {
       cacheKey: song.url,
       ffmpegInputOptions,
       cache: shouldCacheVideo,
-      volumeAdjustment: format?.loudnessDb ? `${-format.loudnessDb}dB` : undefined,
+      volumeAdjustment: format?.loudnessDb
+        ? `${-format.loudnessDb}dB`
+        : undefined,
     });
   }
 
@@ -720,16 +794,25 @@ export default class {
       return;
     }
 
-    if (this.voiceConnection.listeners(VoiceConnectionStatus.Disconnected).length === 0) {
-      this.voiceConnection.on(VoiceConnectionStatus.Disconnected, this.onVoiceConnectionDisconnect.bind(this));
+    if (
+      this.voiceConnection.listeners(VoiceConnectionStatus.Disconnected)
+        .length === 0
+    ) {
+      this.voiceConnection.on(
+        VoiceConnectionStatus.Disconnected,
+        this.onVoiceConnectionDisconnect.bind(this),
+      );
     }
 
     if (!this.audioPlayer) {
       return;
     }
 
-    if (this.audioPlayer.listeners('stateChange').length === 0) {
-      this.audioPlayer.on(AudioPlayerStatus.Idle, this.onAudioPlayerIdle.bind(this));
+    if (this.audioPlayer.listeners("stateChange").length === 0) {
+      this.audioPlayer.on(
+        AudioPlayerStatus.Idle,
+        this.onAudioPlayerIdle.bind(this),
+      );
     }
   }
 
@@ -737,29 +820,43 @@ export default class {
     this.disconnect();
   }
 
-  private async onAudioPlayerIdle(_oldState: AudioPlayerState, newState: AudioPlayerState): Promise<void> {
+  private async onAudioPlayerIdle(
+    _oldState: AudioPlayerState,
+    newState: AudioPlayerState,
+  ): Promise<void> {
     // Automatically advance queued song at end
-    if (this.loopCurrentSong && newState.status === AudioPlayerStatus.Idle && this.status === STATUS.PLAYING) {
+    if (
+      this.loopCurrentSong &&
+      newState.status === AudioPlayerStatus.Idle &&
+      this.status === STATUS.PLAYING
+    ) {
       await this.seek(0);
       return;
     }
 
     // Automatically re-add current song to queue
-    if (this.loopCurrentQueue && newState.status === AudioPlayerStatus.Idle && this.status === STATUS.PLAYING) {
+    if (
+      this.loopCurrentQueue &&
+      newState.status === AudioPlayerStatus.Idle &&
+      this.status === STATUS.PLAYING
+    ) {
       const currentSong = this.getCurrent();
 
       if (currentSong) {
         this.add(currentSong);
       } else {
-        throw new Error('No song currently playing.');
+        throw new Error("No song currently playing.");
       }
     }
 
-    if (newState.status === AudioPlayerStatus.Idle && this.status === STATUS.PLAYING) {
+    if (
+      newState.status === AudioPlayerStatus.Idle &&
+      this.status === STATUS.PLAYING
+    ) {
       await this.forward(1);
       // Auto announce the next song if configured to
       const settings = await getGuildSettings(this.guildId);
-      const {autoAnnounceNextSong} = settings;
+      const { autoAnnounceNextSong } = settings;
       if (autoAnnounceNextSong && this.currentChannel) {
         await this.currentChannel.send({
           embeds: this.getCurrent() ? [buildPlayingMessageEmbed(this)] : [],
@@ -768,12 +865,20 @@ export default class {
     }
   }
 
-  private async createReadStream(options: {url: string; cacheKey: string; ffmpegInputOptions?: string[]; cache?: boolean; volumeAdjustment?: string}): Promise<Readable> {
+  private async createReadStream(options: {
+    url: string;
+    cacheKey: string;
+    ffmpegInputOptions?: string[];
+    cache?: boolean;
+    volumeAdjustment?: string;
+  }): Promise<Readable> {
     return new Promise((resolve, reject) => {
       const capacitor = new WriteStream();
 
       if (options?.cache) {
-        const cacheStream = this.fileCache.createWriteStream(this.getHashForCache(options.cacheKey));
+        const cacheStream = this.fileCache.createWriteStream(
+          this.getHashForCache(options.cacheKey),
+        );
         capacitor.createReadStream().pipe(cacheStream);
       }
 
@@ -781,25 +886,28 @@ export default class {
       let hasReturnedStreamClosed = false;
 
       const stream = ffmpeg(options.url)
-        .inputOptions(options?.ffmpegInputOptions ?? ['-re'])
+        .inputOptions(options?.ffmpegInputOptions ?? ["-re"])
         .noVideo()
-        .audioCodec('libopus')
-        .outputFormat('webm')
-        .addOutputOption(['-filter:a', `volume=${options?.volumeAdjustment ?? '1'}`])
-        .on('error', error => {
+        .audioCodec("libopus")
+        .outputFormat("webm")
+        .addOutputOption([
+          "-filter:a",
+          `volume=${options?.volumeAdjustment ?? "1"}`,
+        ])
+        .on("error", (error) => {
           if (!hasReturnedStreamClosed) {
             reject(error);
           }
         })
-        .on('start', command => {
+        .on("start", (command) => {
           debug(`Spawned ffmpeg with ${command}`);
         });
 
       stream.pipe(capacitor);
 
-      returnedStream.on('close', () => {
+      returnedStream.on("close", () => {
         if (!options.cache) {
-          stream.kill('SIGKILL');
+          stream.kill("SIGKILL");
         }
 
         hasReturnedStreamClosed = true;
